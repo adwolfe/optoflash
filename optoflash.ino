@@ -9,10 +9,12 @@
 //  delay(2000);                  // wait for a second
 //}
 
-const int ledPin =  0;          // the number of the LED pin
+const int ledPin =  0;          // the number of the LED pin (must be PWM-capable for dimming)
 int ledState = LOW;             // ledState used to set the LED
 boolean newData = false;
 boolean startSignal = false;
+const bool ctrlActiveLow = true;   // BuckPuck CTRL: LOW=ON, HIGH=OFF
+const bool driveInvertsCtrl = true; // transistor inverts pin -> CTRL
 
 const byte numChars = 32;
 char receivedChars[numChars];
@@ -30,6 +32,7 @@ int burstOn = 0;       // ms (0 = disabled, use single-pulse mode)
 int burstOff = 0;      // ms
 int burstDuration = 0; // ms (total time to run burst within each cycle)
 int restBetweenBursts = 0; // ms (LED off after burst, per cycle)
+int brightnessPercent = 100; // 0-100 (% duty for ON time)
 unsigned long startTime = 0;  //ms
 unsigned long elapsedExptTime = 0; // ms
 unsigned long startPulseTime = 0;
@@ -45,11 +48,12 @@ unsigned long elapsedSubpulseTime = 0;
 
 void setup() {
     Serial.begin(9600);
-    Serial.println("Input data: SIGNAL, Experiment Length (min), Rest Length (min), Pulse Width (ms), Frequency (Hz)"); 
-    Serial.println("Enter data in this style <SET, 2000, 1000, 10, 20> ");
+    Serial.println("Input data: SIGNAL, Experiment Length (min), Rest Length (min), Pulse Width (ms), Frequency (Hz), [Burst On (ms), Burst Off (ms), Burst Duration (ms), Rest Between Bursts (ms)], [Brightness %]"); 
+    Serial.println("Enter data in this style <START, 5, 0, 10, 20, 100, 900, 5000, 25000, 100> ");
     Serial.println();
     // initialize the digital pin as an output.
     pinMode(ledPin, OUTPUT);
+    analogWrite(ledPin, pwmOff());
 }
 
 //============
@@ -113,20 +117,20 @@ void loop() {
                             elapsedSubpulseTime = millis() - startSubpulseTime;
                             int subpulsePeriod = burstOn + burstOff;
                             if (subpulsePeriod <= 0) {
-                                digitalWrite(ledPin, LOW);
+                                analogWrite(ledPin, pwmOff());
                             } else {
                                 if (elapsedSubpulseTime >= (unsigned long)subpulsePeriod) {
                                     startSubpulseTime = millis();
                                     elapsedSubpulseTime = 0;
                                 }
                                 if (elapsedSubpulseTime < (unsigned long)burstOn) {
-                                    digitalWrite(ledPin, HIGH);
+                                    analogWrite(ledPin, pwmOn());
                                 } else {
-                                    digitalWrite(ledPin, LOW);
+                                    analogWrite(ledPin, pwmOff());
                                 }
                             }
                         } else {
-                            digitalWrite(ledPin, LOW);
+                            analogWrite(ledPin, pwmOff());
                         }
                     }
                     // Single-pulse mode (Case 1)
@@ -136,15 +140,15 @@ void loop() {
                             //Serial.print("Pulse began at ");
                             //Serial.print(startPulseTime);
                             //Serial.println(" ms.");
-                            digitalWrite(ledPin, HIGH);
+                            analogWrite(ledPin, pwmOn());
                             elapsedPulseTime = millis() - startPulseTime;
                         }
                         if (elapsedPulseTime < pulseWidth) {
-                            digitalWrite(ledPin, HIGH);
+                            analogWrite(ledPin, pwmOn());
                             elapsedPulseTime = millis() - startPulseTime;
                         }
                         else {
-                            digitalWrite(ledPin, LOW);
+                            analogWrite(ledPin, pwmOff());
                             elapsedPulseTime = millis() - startPulseTime;
                         }
                     }
@@ -159,14 +163,14 @@ void loop() {
                     elapsedCycleTime = 0;  
                     startSubpulseTime = 0;
                     elapsedSubpulseTime = 0;
-                    digitalWrite(ledPin, LOW);         
+                    analogWrite(ledPin, pwmOff());         
                 } 
             }
         }
         elapsedExptTime = millis() - startTime;    
     }
     else if (startSignal == false && elapsedExptTime > 0) {
-        digitalWrite(ledPin, LOW); 
+        analogWrite(ledPin, pwmOff()); 
         Serial.print("Experiment stopped at ");
         Serial.print(millis());
         Serial.println(" ms.");
@@ -236,6 +240,23 @@ static void trimInPlace(char *s) {
             break;
         }
     }
+}
+
+int pwmOn() {
+    int pct = brightnessPercent;
+    if (pct < 0) {
+        pct = 0;
+    } else if (pct > 100) {
+        pct = 100;
+    }
+    int value = (pct * 255) / 100;
+    int level = ctrlActiveLow ? (255 - value) : value;
+    return driveInvertsCtrl ? (255 - level) : level;
+}
+
+int pwmOff() {
+    int level = ctrlActiveLow ? 255 : 0;
+    return driveInvertsCtrl ? (255 - level) : level;
 }
 
 void parseData() {      // split the data into its parts
@@ -335,6 +356,16 @@ void parseData() {      // split the data into its parts
             }
         }
 
+        // Optional brightness (%)
+        strtokIndx = strtok(NULL, ",");
+        if (strtokIndx != NULL) {
+            trimInPlace(strtokIndx);
+            int bp = atoi(strtokIndx);
+            if (bp >= 0 && bp <= 100) {
+                brightnessPercent = bp;
+            }
+        }
+
         if (burstDuration > 0) {
             frequency = burstDuration + restBetweenBursts;
         }
@@ -375,4 +406,6 @@ void showParsedData() {
     Serial.println(burstDuration);
     Serial.print("Rest Between Bursts (ms) ");
     Serial.println(restBetweenBursts);
+    Serial.print("Brightness (%) ");
+    Serial.println(brightnessPercent);
 }

@@ -58,11 +58,16 @@ public:
         frequencyHz->setDecimals(4);
         frequencyHz->setValue(0.0333); // 30s period
 
+        brightnessPercent = new QSpinBox(this);
+        brightnessPercent->setRange(0, 100);
+        brightnessPercent->setValue(100);
+
         QFormLayout *commonForm = new QFormLayout();
         commonForm->addRow("Experiment length (min)", exptLengthMin);
         commonForm->addRow("Initial rest (min, optional)", restMin);
-        commonForm->addRow("Pulse width (ms)", pulseWidthMs);
-        commonForm->addRow("Frequency (Hz, steady mode)", frequencyHz);
+        commonForm->addRow("Stimulation time (ms, steady on-time)", pulseWidthMs);
+        commonForm->addRow("Steady cycle rate (Hz)", frequencyHz);
+        commonForm->addRow("Brightness (%)", brightnessPercent);
 
         QGroupBox *commonBox = new QGroupBox("Common Parameters", this);
         commonBox->setLayout(commonForm);
@@ -85,8 +90,8 @@ public:
         restBetweenMs->setValue(25000);
 
         QFormLayout *burstForm = new QFormLayout();
-        burstForm->addRow("Burst on (ms)", burstOnMs);
-        burstForm->addRow("Burst off (ms)", burstOffMs);
+        burstForm->addRow("Pulse width (ms, ON)", burstOnMs);
+        burstForm->addRow("Pulse gap (ms, OFF)", burstOffMs);
         burstForm->addRow("Burst duration (ms)", burstDurationMs);
         burstForm->addRow("Rest between bursts (ms)", restBetweenMs);
 
@@ -184,7 +189,7 @@ private slots:
 
         QString cmd;
         if (burstRadio->isChecked()) {
-            cmd = QString("<START, %1, %2, %3, %4, %5, %6, %7, %8>")
+            cmd = QString("<START, %1, %2, %3, %4, %5, %6, %7, %8, %9>")
                       .arg(formatMin(exptLengthMin->value()))
                       .arg(formatMin(restMin->value()))
                       .arg(pulseWidthMs->value())
@@ -192,13 +197,15 @@ private slots:
                       .arg(burstOnMs->value())
                       .arg(burstOffMs->value())
                       .arg(burstDurationMs->value())
-                      .arg(restBetweenMs->value());
+                      .arg(restBetweenMs->value())
+                      .arg(brightnessPercent->value());
         } else {
-            cmd = QString("<START, %1, %2, %3, %4>")
+            cmd = QString("<START, %1, %2, %3, %4, %5>")
                       .arg(formatMin(exptLengthMin->value()))
                       .arg(formatMin(restMin->value()))
                       .arg(pulseWidthMs->value())
-                      .arg(formatHz(frequencyHz->value()));
+                      .arg(formatHz(frequencyHz->value()))
+                      .arg(brightnessPercent->value());
         }
 
         writeLine(cmd);
@@ -268,6 +275,7 @@ private:
     QDoubleSpinBox *restMin = nullptr;
     QSpinBox *pulseWidthMs = nullptr;
     QDoubleSpinBox *frequencyHz = nullptr;
+    QSpinBox *brightnessPercent = nullptr;
 
     QGroupBox *burstBox = nullptr;
     QSpinBox *burstOnMs = nullptr;

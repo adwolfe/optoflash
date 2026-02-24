@@ -3,6 +3,7 @@ project(optoflash_gui LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
 
 # Try Qt6 first, then Qt5
 find_package(Qt6 COMPONENTS Widgets SerialPort QUIET)
