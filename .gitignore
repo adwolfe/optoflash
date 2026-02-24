@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Qt Creator
+*.user
+*.user.*
+*.autosave
+*.qmlproject.user
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Build directories
+build*/
+
+# Generated Qt files (if any)
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# Temporary
+*.log
+*.tmp
