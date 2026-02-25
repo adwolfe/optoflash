@@ -16,7 +16,8 @@ boolean startSignal = false;
 const bool ctrlActiveLow = true;   // BuckPuck CTRL: LOW=ON, HIGH=OFF
 const bool driveInvertsCtrl = true; // transistor inverts pin -> CTRL
 
-const byte numChars = 32;
+// Buffer must hold full START command with burst parameters
+const byte numChars = 128;
 char receivedChars[numChars];
 char tempChars[numChars];
 char messageFromPC[numChars] = {0};
