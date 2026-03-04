@@ -31,72 +31,61 @@ public:
         portRow->addWidget(connectButton);
         portRow->addWidget(statusLabel);
 
-        // Mode selection
-        steadyRadio = new QRadioButton("Steady (single pulse per cycle)", this);
-        burstRadio = new QRadioButton("Burst (sub-pulses inside cycle)", this);
-        steadyRadio->setChecked(true);
-
-        connect(steadyRadio, &QRadioButton::toggled, this, &OptoDialog::updateMode);
-
-        // Common parameters
+        // Parameters (single set)
         exptLengthMin = new QDoubleSpinBox(this);
         exptLengthMin->setRange(0.0, 600.0);
         exptLengthMin->setDecimals(2);
         exptLengthMin->setValue(5.0);
+
+        brightnessPercent = new QSpinBox(this);
+        brightnessPercent->setRange(0, 100);
+        brightnessPercent->setValue(100);
 
         restMin = new QDoubleSpinBox(this);
         restMin->setRange(0.0, 600.0);
         restMin->setDecimals(2);
         restMin->setValue(0.0);
 
-        pulseWidthMs = new QSpinBox(this);
-        pulseWidthMs->setRange(1, 600000);
-        pulseWidthMs->setValue(5000);
+        stimPeriodMs = new QSpinBox(this);
+        stimPeriodMs->setRange(1, 600000);
+        stimPeriodMs->setValue(5000);
 
-        frequencyHz = new QDoubleSpinBox(this);
-        frequencyHz->setRange(0.0001, 1000.0);
-        frequencyHz->setDecimals(4);
-        frequencyHz->setValue(0.0333); // 30s period
+        continuousRadio = new QRadioButton("Continuous", this);
+        flickerRadio = new QRadioButton("Flicker", this);
+        continuousRadio->setChecked(true);
+        connect(continuousRadio, &QRadioButton::toggled, this, &OptoDialog::updateFlicker);
 
-        brightnessPercent = new QSpinBox(this);
-        brightnessPercent->setRange(0, 100);
-        brightnessPercent->setValue(100);
+        flickerOnMs = new QSpinBox(this);
+        flickerOnMs->setRange(1, 600000);
+        flickerOnMs->setValue(100);
 
-        QFormLayout *commonForm = new QFormLayout();
-        commonForm->addRow("Experiment length (min)", exptLengthMin);
-        commonForm->addRow("Initial rest (min, optional)", restMin);
-        commonForm->addRow("Stimulation time (ms, steady on-time)", pulseWidthMs);
-        commonForm->addRow("Steady cycle rate (Hz)", frequencyHz);
-        commonForm->addRow("Brightness (%)", brightnessPercent);
+        flickerOffMs = new QSpinBox(this);
+        flickerOffMs->setRange(0, 600000);
+        flickerOffMs->setValue(900);
 
-        QGroupBox *commonBox = new QGroupBox("Common Parameters", this);
-        commonBox->setLayout(commonForm);
+        restIntervalMs = new QSpinBox(this);
+        restIntervalMs->setRange(0, 600000);
+        restIntervalMs->setValue(25000);
 
-        // Burst parameters
-        burstOnMs = new QSpinBox(this);
-        burstOnMs->setRange(1, 600000);
-        burstOnMs->setValue(100);
+        QFormLayout *paramForm = new QFormLayout();
+        paramForm->addRow("Experiment Length (min)", exptLengthMin);
+        paramForm->addRow("Power (%)", brightnessPercent);
+        paramForm->addRow("Initial rest (min, optional)", restMin);
+        paramForm->addRow("Stimulation Period (ms)", stimPeriodMs);
 
-        burstOffMs = new QSpinBox(this);
-        burstOffMs->setRange(0, 600000);
-        burstOffMs->setValue(900);
+        QHBoxLayout *modeRow = new QHBoxLayout();
+        modeRow->addWidget(continuousRadio);
+        modeRow->addWidget(flickerRadio);
+        QWidget *modeWidget = new QWidget(this);
+        modeWidget->setLayout(modeRow);
+        paramForm->addRow("Mode", modeWidget);
 
-        burstDurationMs = new QSpinBox(this);
-        burstDurationMs->setRange(1, 600000);
-        burstDurationMs->setValue(5000);
+        paramForm->addRow("LED on time (ms)", flickerOnMs);
+        paramForm->addRow("LED off time (ms)", flickerOffMs);
+        paramForm->addRow("Rest interval (ms)", restIntervalMs);
 
-        restBetweenMs = new QSpinBox(this);
-        restBetweenMs->setRange(0, 600000);
-        restBetweenMs->setValue(25000);
-
-        QFormLayout *burstForm = new QFormLayout();
-        burstForm->addRow("Pulse width (ms, ON)", burstOnMs);
-        burstForm->addRow("Pulse gap (ms, OFF)", burstOffMs);
-        burstForm->addRow("Burst duration (ms)", burstDurationMs);
-        burstForm->addRow("Rest between bursts (ms)", restBetweenMs);
-
-        burstBox = new QGroupBox("Burst Parameters", this);
-        burstBox->setLayout(burstForm);
+        QGroupBox *paramBox = new QGroupBox("Stimulation Parameters", this);
+        paramBox->setLayout(paramForm);
 
         QPushButton *startButton = new QPushButton("Send START", this);
         QPushButton *stopButton = new QPushButton("Send STOP", this);
@@ -119,10 +108,7 @@ public:
         QVBoxLayout *mainLayout = new QVBoxLayout();
         mainLayout->addLayout(portRow);
         mainLayout->addSpacing(8);
-        mainLayout->addWidget(steadyRadio);
-        mainLayout->addWidget(burstRadio);
-        mainLayout->addWidget(commonBox);
-        mainLayout->addWidget(burstBox);
+        mainLayout->addWidget(paramBox);
         mainLayout->addLayout(buttonRow);
         mainLayout->addWidget(logView, 1);
 
@@ -132,7 +118,7 @@ public:
         connect(serial, &QSerialPort::readyRead, this, &OptoDialog::readSerial);
 
         refreshPorts();
-        updateMode();
+        updateFlicker();
     }
 
 private slots:
@@ -177,36 +163,27 @@ private slots:
         logLine(QString("Connected to %1").arg(portName));
     }
 
-    void updateMode() {
-        const bool burst = burstRadio->isChecked();
-        burstBox->setEnabled(burst);
-    }
-
     void sendStart() {
         if (!ensureOpen()) {
             return;
         }
 
-        QString cmd;
-        if (burstRadio->isChecked()) {
-            cmd = QString("<START, %1, %2, %3, %4, %5, %6, %7, %8, %9>")
-                      .arg(formatMin(exptLengthMin->value()))
-                      .arg(formatMin(restMin->value()))
-                      .arg(pulseWidthMs->value())
-                      .arg(formatHz(frequencyHz->value()))
-                      .arg(burstOnMs->value())
-                      .arg(burstOffMs->value())
-                      .arg(burstDurationMs->value())
-                      .arg(restBetweenMs->value())
-                      .arg(brightnessPercent->value());
-        } else {
-            cmd = QString("<START, %1, %2, %3, %4, %5>")
-                      .arg(formatMin(exptLengthMin->value()))
-                      .arg(formatMin(restMin->value()))
-                      .arg(pulseWidthMs->value())
-                      .arg(formatHz(frequencyHz->value()))
-                      .arg(brightnessPercent->value());
-        }
+        const int burstDuration = stimPeriodMs->value();
+        const bool flicker = flickerRadio->isChecked();
+        const int onMs = flicker ? flickerOnMs->value() : burstDuration;
+        const int offMs = flicker ? flickerOffMs->value() : 0;
+        const int intervalMs = restIntervalMs->value();
+
+        const QString cmd = QString("<START, %1, %2, %3, %4, %5, %6, %7, %8, %9>")
+                                .arg(formatMin(exptLengthMin->value()))
+                                .arg(formatMin(restMin->value()))
+                                .arg(onMs) // legacy pulse width
+                                .arg(formatHz(1.0)) // legacy Hz; overridden by burstDuration
+                                .arg(onMs)
+                                .arg(offMs)
+                                .arg(burstDuration)
+                                .arg(intervalMs)
+                                .arg(brightnessPercent->value());
 
         writeLine(cmd);
     }
@@ -255,6 +232,12 @@ private:
         logView->append(line);
     }
 
+    void updateFlicker() {
+        const bool flicker = flickerRadio->isChecked();
+        flickerOnMs->setEnabled(flicker);
+        flickerOffMs->setEnabled(flicker);
+    }
+
     static QString formatMin(double v) {
         return QString::number(v, 'f', 2);
     }
@@ -268,20 +251,16 @@ private:
     QComboBox *baudCombo = nullptr;
     QLabel *statusLabel = nullptr;
 
-    QRadioButton *steadyRadio = nullptr;
-    QRadioButton *burstRadio = nullptr;
-
     QDoubleSpinBox *exptLengthMin = nullptr;
     QDoubleSpinBox *restMin = nullptr;
-    QSpinBox *pulseWidthMs = nullptr;
-    QDoubleSpinBox *frequencyHz = nullptr;
     QSpinBox *brightnessPercent = nullptr;
 
-    QGroupBox *burstBox = nullptr;
-    QSpinBox *burstOnMs = nullptr;
-    QSpinBox *burstOffMs = nullptr;
-    QSpinBox *burstDurationMs = nullptr;
-    QSpinBox *restBetweenMs = nullptr;
+    QSpinBox *stimPeriodMs = nullptr;
+    QRadioButton *continuousRadio = nullptr;
+    QRadioButton *flickerRadio = nullptr;
+    QSpinBox *flickerOnMs = nullptr;
+    QSpinBox *flickerOffMs = nullptr;
+    QSpinBox *restIntervalMs = nullptr;
 
     QTextEdit *logView = nullptr;
 

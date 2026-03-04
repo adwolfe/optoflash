@@ -49,8 +49,9 @@ unsigned long elapsedSubpulseTime = 0;
 
 void setup() {
     Serial.begin(9600);
-    Serial.println("Input data: SIGNAL, Experiment Length (min), Rest Length (min), Pulse Width (ms), Frequency (Hz), [Burst On (ms), Burst Off (ms), Burst Duration (ms), Rest Between Bursts (ms)], [Brightness %]"); 
-    Serial.println("Enter data in this style <START, 5, 0, 10, 20, 100, 900, 5000, 25000, 100> ");
+    Serial.println("Input data: SIGNAL, Experiment Length (min), Initial Rest (min), Stimulation Period (ms), Mode (Continuous|Flicker), [LED On (ms), LED Off (ms)], Rest Interval (ms), Power (%)"); 
+    Serial.println("Enter data like <START, 5, 0, 5000, Continuous, 25000, 100>");
+    Serial.println("Or for flicker: <START, 5, 0, 5000, Flicker, 100, 900, 25000, 100>");
     Serial.println();
     // initialize the digital pin as an output.
     pinMode(ledPin, OUTPUT);
