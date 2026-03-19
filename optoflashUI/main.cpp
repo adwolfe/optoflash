@@ -142,7 +142,7 @@ public:
         restMin->setValue(0.0);
 
         stimPeriodMs = new QSpinBox(this);
-        stimPeriodMs->setRange(1, 600000);
+        stimPeriodMs->setRange(2, 600000);
         stimPeriodMs->setValue(5000);
 
         cycleLengthMs = new QSpinBox(this);
@@ -188,8 +188,20 @@ public:
         QGroupBox *paramBox = new QGroupBox("Stimulation Parameters", this);
         QVBoxLayout *paramBoxLayout = new QVBoxLayout();
         QHBoxLayout *previewRow = new QHBoxLayout();
-        previewRow->addWidget(cyclePreview, 0, Qt::AlignTop | Qt::AlignLeft);
-        previewRow->addWidget(protocolPreview, 1);
+        QLabel *cycleTitle = new QLabel("Stimulation Cycle", this);
+        cycleTitle->setAlignment(Qt::AlignHCenter);
+        QVBoxLayout *cyclePanel = new QVBoxLayout();
+        cyclePanel->addWidget(cycleTitle);
+        cyclePanel->addWidget(cyclePreview, 0, Qt::AlignHCenter);
+
+        QLabel *protocolTitle = new QLabel("Experimental Protocol", this);
+        protocolTitle->setAlignment(Qt::AlignHCenter);
+        QVBoxLayout *protocolPanel = new QVBoxLayout();
+        protocolPanel->addWidget(protocolTitle);
+        protocolPanel->addWidget(protocolPreview, 1);
+
+        previewRow->addLayout(cyclePanel, 0);
+        previewRow->addLayout(protocolPanel, 1);
         paramBoxLayout->addLayout(previewRow);
         paramBoxLayout->addLayout(paramForm);
         paramBox->setLayout(paramBoxLayout);
@@ -229,7 +241,9 @@ public:
         connect(cycleLengthMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncCycleLengthMinimum);
         connect(cycleLengthMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncCycleLengthMinimum);
+        connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncFlickerTimingLimits);
         connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(flickerOnMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncFlickerTimingLimits);
         connect(flickerOnMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(flickerOffMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(continuousRadio, &QRadioButton::toggled, this, &OptoDialog::updateProtocolPreview);
@@ -238,6 +252,7 @@ public:
         refreshPorts();
         updateFlicker();
         syncCycleLengthMinimum();
+        syncFlickerTimingLimits();
         updateProtocolPreview();
     }
 
@@ -364,6 +379,21 @@ private:
         cycleLengthMs->setMinimum(stimMs);
         if (cycleLengthMs->value() < stimMs) {
             cycleLengthMs->setValue(stimMs);
+        }
+    }
+
+    void syncFlickerTimingLimits() {
+        const int stimMs = stimPeriodMs->value();
+        const int maxOn = qMax(1, stimMs - 1);
+        flickerOnMs->setMaximum(maxOn);
+        if (flickerOnMs->value() > maxOn) {
+            flickerOnMs->setValue(maxOn);
+        }
+
+        const int maxOff = qMax(0, stimMs - flickerOnMs->value() - 1);
+        flickerOffMs->setMaximum(maxOff);
+        if (flickerOffMs->value() > maxOff) {
+            flickerOffMs->setValue(maxOff);
         }
     }
 
