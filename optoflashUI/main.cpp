@@ -2,6 +2,79 @@
 #include <QtSerialPort/QSerialPort>
 #include <QtSerialPort/QSerialPortInfo>
 
+class ProtocolPreviewWidget : public QWidget {
+public:
+    explicit ProtocolPreviewWidget(QWidget *parent = nullptr) : QWidget(parent) {
+        setMinimumHeight(170);
+    }
+
+    void setData(const QVector<QPointF> &points, double totalMs, bool simplifiedFlicker) {
+        points_ = points;
+        totalMs_ = qMax(1.0, totalMs);
+        simplifiedFlicker_ = simplifiedFlicker;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.fillRect(rect(), palette().base());
+
+        const QRect chartRect = rect().adjusted(44, 14, -14, -34);
+        if (chartRect.width() < 20 || chartRect.height() < 20) {
+            return;
+        }
+
+        painter.setPen(QPen(QColor(210, 210, 210), 1));
+        painter.drawRect(chartRect);
+
+        painter.setPen(QColor(120, 120, 120));
+        painter.drawText(6, chartRect.top() + 5, "100%");
+        painter.drawText(12, chartRect.bottom() + 5, "0%");
+        painter.drawText(chartRect.left(), height() - 10, "0");
+        painter.drawText(chartRect.right() - 46, height() - 10, formatDuration(totalMs_));
+
+        if (points_.isEmpty()) {
+            painter.drawText(chartRect.adjusted(8, 8, -8, -8), Qt::AlignCenter, "No protocol to preview");
+            return;
+        }
+
+        QPainterPath path;
+        bool first = true;
+        for (const QPointF &pt : points_) {
+            const qreal x = chartRect.left() + (pt.x() / totalMs_) * chartRect.width();
+            const qreal y = chartRect.bottom() - (pt.y() / 100.0) * chartRect.height();
+            if (first) {
+                path.moveTo(x, y);
+                first = false;
+            } else {
+                path.lineTo(x, y);
+            }
+        }
+
+        painter.setPen(QPen(QColor(25, 118, 210), 2));
+        painter.drawPath(path);
+
+        if (simplifiedFlicker_) {
+            painter.setPen(QColor(130, 130, 130));
+            painter.drawText(chartRect.adjusted(8, 8, -8, -8), Qt::AlignTop | Qt::AlignRight, "Flicker detail simplified");
+        }
+    }
+
+private:
+    static QString formatDuration(double totalMs) {
+        if (totalMs >= 120000.0) {
+            return QString("%1 min").arg(QString::number(totalMs / 60000.0, 'f', 1));
+        }
+        return QString("%1 s").arg(QString::number(totalMs / 1000.0, 'f', 1));
+    }
+
+    QVector<QPointF> points_;
+    double totalMs_ = 1.0;
+    bool simplifiedFlicker_ = false;
+};
+
 class OptoDialog : public QDialog {
     Q_OBJECT
 public:
@@ -67,6 +140,8 @@ public:
         restIntervalMs->setRange(0, 600000);
         restIntervalMs->setValue(25000);
 
+        protocolPreview = new ProtocolPreviewWidget(this);
+
         QFormLayout *paramForm = new QFormLayout();
         paramForm->addRow("Experiment Length (min)", exptLengthMin);
         paramForm->addRow("Power (%)", brightnessPercent);
@@ -85,7 +160,10 @@ public:
         paramForm->addRow("Rest interval (ms)", restIntervalMs);
 
         QGroupBox *paramBox = new QGroupBox("Stimulation Parameters", this);
-        paramBox->setLayout(paramForm);
+        QVBoxLayout *paramBoxLayout = new QVBoxLayout();
+        paramBoxLayout->addWidget(protocolPreview);
+        paramBoxLayout->addLayout(paramForm);
+        paramBox->setLayout(paramBoxLayout);
 
         QPushButton *startButton = new QPushButton("Send START", this);
         QPushButton *stopButton = new QPushButton("Send STOP", this);
@@ -116,9 +194,19 @@ public:
 
         serial = new QSerialPort(this);
         connect(serial, &QSerialPort::readyRead, this, &OptoDialog::readSerial);
+        connect(exptLengthMin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(brightnessPercent, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(restMin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(flickerOnMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(flickerOffMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(restIntervalMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(continuousRadio, &QRadioButton::toggled, this, &OptoDialog::updateProtocolPreview);
+        connect(flickerRadio, &QRadioButton::toggled, this, &OptoDialog::updateProtocolPreview);
 
         refreshPorts();
         updateFlicker();
+        updateProtocolPreview();
     }
 
 private slots:
@@ -236,6 +324,28 @@ private:
         const bool flicker = flickerRadio->isChecked();
         flickerOnMs->setEnabled(flicker);
         flickerOffMs->setEnabled(flicker);
+        updateProtocolPreview();
+    }
+
+    void updateProtocolPreview() {
+        const double totalMs = exptLengthMin->value() * 60000.0;
+        const int power = brightnessPercent->value();
+        const double initialRestMs = qBound(0.0, restMin->value() * 60000.0, qMax(0.0, totalMs));
+        const int burstMs = stimPeriodMs->value();
+        const int intervalMs = restIntervalMs->value();
+        const bool flicker = flickerRadio->isChecked();
+        const int onMs = flicker ? flickerOnMs->value() : burstMs;
+        const int offMs = flicker ? flickerOffMs->value() : 0;
+
+        bool simplifiedFlicker = false;
+        bool overflow = false;
+        QVector<QPointF> points = buildProtocolPoints(totalMs, initialRestMs, power, burstMs, intervalMs, onMs, offMs, flicker, true, overflow);
+        if (overflow) {
+            simplifiedFlicker = true;
+            points = buildProtocolPoints(totalMs, initialRestMs, power, burstMs, intervalMs, onMs, offMs, flicker, false, overflow);
+        }
+
+        protocolPreview->setData(points, totalMs, simplifiedFlicker);
     }
 
     static QString formatMin(double v) {
@@ -244,6 +354,86 @@ private:
 
     static QString formatHz(double v) {
         return QString::number(v, 'f', 4);
+    }
+
+    static QVector<QPointF> buildProtocolPoints(
+        double totalMs,
+        double initialRestMs,
+        int power,
+        int burstMs,
+        int intervalMs,
+        int onMs,
+        int offMs,
+        bool flicker,
+        bool includeFlickerDetail,
+        bool &overflow) {
+        overflow = false;
+        QVector<QPointF> points;
+        if (totalMs <= 0.0) {
+            return points;
+        }
+
+        const int maxPoints = 3000;
+        auto addTransition = [&](double t, double level) {
+            t = qBound(0.0, t, totalMs);
+            if (points.isEmpty()) {
+                points.append(QPointF(t, level));
+                return;
+            }
+
+            const double prevLevel = points.last().y();
+            if (!qFuzzyCompare(prevLevel + 1.0, level + 1.0)) {
+                points.append(QPointF(t, prevLevel));
+                points.append(QPointF(t, level));
+            } else if (!qFuzzyCompare(points.last().x() + 1.0, t + 1.0)) {
+                points.append(QPointF(t, level));
+            }
+
+            if (points.size() > maxPoints) {
+                overflow = true;
+            }
+        };
+
+        double t = 0.0;
+        addTransition(0.0, 0.0);
+        t = initialRestMs;
+        addTransition(t, 0.0);
+
+        while (t < totalMs && !overflow) {
+            const double stimStart = t;
+            const double stimEnd = qMin(totalMs, stimStart + burstMs);
+
+            if (flicker && includeFlickerDetail && onMs > 0 && (onMs + offMs) > 0) {
+                double pulseT = stimStart;
+                while (pulseT < stimEnd && !overflow) {
+                    const double onEnd = qMin(stimEnd, pulseT + onMs);
+                    addTransition(pulseT, power);
+                    addTransition(onEnd, 0.0);
+                    pulseT = onEnd;
+
+                    if (pulseT >= stimEnd || offMs <= 0) {
+                        continue;
+                    }
+                    pulseT = qMin(stimEnd, pulseT + offMs);
+                    addTransition(pulseT, 0.0);
+                }
+            } else {
+                addTransition(stimStart, power);
+                addTransition(stimEnd, 0.0);
+            }
+
+            t = stimEnd;
+            if (t >= totalMs) {
+                break;
+            }
+
+            const double restEnd = qMin(totalMs, t + intervalMs);
+            addTransition(restEnd, 0.0);
+            t = restEnd;
+        }
+
+        addTransition(totalMs, 0.0);
+        return points;
     }
 
     QComboBox *portCombo = nullptr;
@@ -261,6 +451,7 @@ private:
     QSpinBox *flickerOnMs = nullptr;
     QSpinBox *flickerOffMs = nullptr;
     QSpinBox *restIntervalMs = nullptr;
+    ProtocolPreviewWidget *protocolPreview = nullptr;
 
     QTextEdit *logView = nullptr;
 
