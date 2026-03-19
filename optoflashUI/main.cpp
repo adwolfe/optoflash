@@ -32,8 +32,33 @@ protected:
         painter.setPen(QColor(120, 120, 120));
         painter.drawText(6, chartRect.top() + 5, "100%");
         painter.drawText(12, chartRect.bottom() + 5, "0%");
-        painter.drawText(chartRect.left(), height() - 10, "0");
-        painter.drawText(chartRect.right() - 46, height() - 10, formatDuration(totalMs_));
+
+        // Draw X-axis ticks every 0.25 min (15 s) for denser time graduations.
+        const double tickStepMs = 0.25 * 60.0 * 1000.0;
+        const int tickCount = qMax(1, qCeil(totalMs_ / tickStepMs));
+        const QFontMetrics fm = painter.fontMetrics();
+        const int baselineY = height() - 10;
+        const qreal tickSpacingPx = chartRect.width() / qreal(tickCount);
+        const int labelEvery = qMax(1, qCeil(48.0 / qMax(1.0, tickSpacingPx)));
+
+        for (int i = 0; i <= tickCount; ++i) {
+            const double t = qMin(totalMs_, i * tickStepMs);
+            const qreal x = chartRect.left() + (t / totalMs_) * chartRect.width();
+
+            painter.setPen(QColor(235, 235, 235));
+            painter.drawLine(QPointF(x, chartRect.top()), QPointF(x, chartRect.bottom()));
+
+            painter.setPen(QColor(170, 170, 170));
+            painter.drawLine(QPointF(x, chartRect.bottom()), QPointF(x, chartRect.bottom() + 4));
+
+            if ((i % labelEvery) == 0 || i == tickCount) {
+                const QString label = formatTickMinutes(t);
+                const int textW = fm.horizontalAdvance(label);
+                const int textX = qBound(chartRect.left(), int(x - (textW / 2)), chartRect.right() - textW);
+                painter.setPen(QColor(120, 120, 120));
+                painter.drawText(textX, baselineY, label);
+            }
+        }
 
         if (points_.isEmpty()) {
             painter.drawText(chartRect.adjusted(8, 8, -8, -8), Qt::AlignCenter, "No protocol to preview");
@@ -63,11 +88,8 @@ protected:
     }
 
 private:
-    static QString formatDuration(double totalMs) {
-        if (totalMs >= 120000.0) {
-            return QString("%1 min").arg(QString::number(totalMs / 60000.0, 'f', 1));
-        }
-        return QString("%1 s").arg(QString::number(totalMs / 1000.0, 'f', 1));
+    static QString formatTickMinutes(double ms) {
+        return QString::number(ms / 60000.0, 'f', 2);
     }
 
     QVector<QPointF> points_;
@@ -123,6 +145,10 @@ public:
         stimPeriodMs->setRange(1, 600000);
         stimPeriodMs->setValue(5000);
 
+        cycleLengthMs = new QSpinBox(this);
+        cycleLengthMs->setRange(1, 600000);
+        cycleLengthMs->setValue(30000);
+
         continuousRadio = new QRadioButton("Continuous", this);
         flickerRadio = new QRadioButton("Flicker", this);
         continuousRadio->setChecked(true);
@@ -136,9 +162,9 @@ public:
         flickerOffMs->setRange(0, 600000);
         flickerOffMs->setValue(900);
 
-        restIntervalMs = new QSpinBox(this);
-        restIntervalMs->setRange(0, 600000);
-        restIntervalMs->setValue(25000);
+        cyclePreview = new ProtocolPreviewWidget(this);
+        cyclePreview->setFixedSize(170, 170);
+        cyclePreview->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
         protocolPreview = new ProtocolPreviewWidget(this);
 
@@ -146,6 +172,7 @@ public:
         paramForm->addRow("Experiment Length (min)", exptLengthMin);
         paramForm->addRow("Power (%)", brightnessPercent);
         paramForm->addRow("Initial rest (min, optional)", restMin);
+        paramForm->addRow("Cycle Length (ms)", cycleLengthMs);
         paramForm->addRow("Stimulation Period (ms)", stimPeriodMs);
 
         QHBoxLayout *modeRow = new QHBoxLayout();
@@ -157,11 +184,13 @@ public:
 
         paramForm->addRow("LED on time (ms)", flickerOnMs);
         paramForm->addRow("LED off time (ms)", flickerOffMs);
-        paramForm->addRow("Rest interval (ms)", restIntervalMs);
 
         QGroupBox *paramBox = new QGroupBox("Stimulation Parameters", this);
         QVBoxLayout *paramBoxLayout = new QVBoxLayout();
-        paramBoxLayout->addWidget(protocolPreview);
+        QHBoxLayout *previewRow = new QHBoxLayout();
+        previewRow->addWidget(cyclePreview, 0, Qt::AlignTop | Qt::AlignLeft);
+        previewRow->addWidget(protocolPreview, 1);
+        paramBoxLayout->addLayout(previewRow);
         paramBoxLayout->addLayout(paramForm);
         paramBox->setLayout(paramBoxLayout);
 
@@ -197,15 +226,18 @@ public:
         connect(exptLengthMin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(brightnessPercent, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(restMin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(cycleLengthMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncCycleLengthMinimum);
+        connect(cycleLengthMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
+        connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::syncCycleLengthMinimum);
         connect(stimPeriodMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(flickerOnMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(flickerOffMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
-        connect(restIntervalMs, qOverload<int>(&QSpinBox::valueChanged), this, &OptoDialog::updateProtocolPreview);
         connect(continuousRadio, &QRadioButton::toggled, this, &OptoDialog::updateProtocolPreview);
         connect(flickerRadio, &QRadioButton::toggled, this, &OptoDialog::updateProtocolPreview);
 
         refreshPorts();
         updateFlicker();
+        syncCycleLengthMinimum();
         updateProtocolPreview();
     }
 
@@ -260,7 +292,7 @@ private slots:
         const bool flicker = flickerRadio->isChecked();
         const int onMs = flicker ? flickerOnMs->value() : burstDuration;
         const int offMs = flicker ? flickerOffMs->value() : 0;
-        const int intervalMs = restIntervalMs->value();
+        const int intervalMs = qMax(0, cycleLengthMs->value() - burstDuration);
 
         const QString cmd = QString("<START, %1, %2, %3, %4, %5, %6, %7, %8, %9>")
                                 .arg(formatMin(exptLengthMin->value()))
@@ -327,12 +359,21 @@ private:
         updateProtocolPreview();
     }
 
+    void syncCycleLengthMinimum() {
+        const int stimMs = stimPeriodMs->value();
+        cycleLengthMs->setMinimum(stimMs);
+        if (cycleLengthMs->value() < stimMs) {
+            cycleLengthMs->setValue(stimMs);
+        }
+    }
+
     void updateProtocolPreview() {
         const double totalMs = exptLengthMin->value() * 60000.0;
         const int power = brightnessPercent->value();
         const double initialRestMs = qBound(0.0, restMin->value() * 60000.0, qMax(0.0, totalMs));
         const int burstMs = stimPeriodMs->value();
-        const int intervalMs = restIntervalMs->value();
+        const int cycleMs = cycleLengthMs->value();
+        const int intervalMs = qMax(0, cycleLengthMs->value() - burstMs);
         const bool flicker = flickerRadio->isChecked();
         const int onMs = flicker ? flickerOnMs->value() : burstMs;
         const int offMs = flicker ? flickerOffMs->value() : 0;
@@ -346,6 +387,15 @@ private:
         }
 
         protocolPreview->setData(points, totalMs, simplifiedFlicker);
+
+        bool cycleSimplifiedFlicker = false;
+        bool cycleOverflow = false;
+        QVector<QPointF> cyclePoints = buildProtocolPoints(cycleMs, 0.0, power, burstMs, intervalMs, onMs, offMs, flicker, true, cycleOverflow);
+        if (cycleOverflow) {
+            cycleSimplifiedFlicker = true;
+            cyclePoints = buildProtocolPoints(cycleMs, 0.0, power, burstMs, intervalMs, onMs, offMs, flicker, false, cycleOverflow);
+        }
+        cyclePreview->setData(cyclePoints, cycleMs, cycleSimplifiedFlicker);
     }
 
     static QString formatMin(double v) {
@@ -446,11 +496,12 @@ private:
     QSpinBox *brightnessPercent = nullptr;
 
     QSpinBox *stimPeriodMs = nullptr;
+    QSpinBox *cycleLengthMs = nullptr;
     QRadioButton *continuousRadio = nullptr;
     QRadioButton *flickerRadio = nullptr;
     QSpinBox *flickerOnMs = nullptr;
     QSpinBox *flickerOffMs = nullptr;
-    QSpinBox *restIntervalMs = nullptr;
+    ProtocolPreviewWidget *cyclePreview = nullptr;
     ProtocolPreviewWidget *protocolPreview = nullptr;
 
     QTextEdit *logView = nullptr;
